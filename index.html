@@ -74,7 +74,7 @@
     position: absolute; left: 50%; top: 50%; width: var(--knob); height: var(--knob);
     margin: calc(var(--knob) / -2) 0 0 calc(var(--knob) / -2);
     border-radius: 50%; background: radial-gradient(circle at 35% 30%, #6fcaff, var(--accent) 60%, #1f7fb8);
-    box-shadow: 0 4px 14px rgba(0,0,0,.45); pointer-events: none;
+    box-shadow: 0 4px 14px rgba(0,0,0,.45); pointer-events: none; z-index: 1;   /* 盖住中线 */
   }
   .knob.spring { transition: transform .15s ease-out; }
 
@@ -119,8 +119,9 @@
 
 <script>
 // ===== BLE 参数：ECB02 透传模块（与老师 app 的 ECBLE.java 一致） =====
-const SERVICE_UUID    = 0xfff0;
-const WRITE_CHAR_UUID = 0xfff2;
+// 用完整 128 位写法：Bluefy（iOS）不一定接受 0xfff0 这种 16 位数字简写
+const SERVICE_UUID    = '0000fff0-0000-1000-8000-00805f9b34fb';
+const WRITE_CHAR_UUID = '0000fff2-0000-1000-8000-00805f9b34fb';
 const SEND_PERIOD_MS  = 50;          // 老师 app：Thread.sleep(50)
 
 const $ = id => document.getElementById(id);
@@ -221,24 +222,35 @@ async function connect() {
     showError('这个浏览器不支持 Web Bluetooth。iPhone 请用 Bluefy 浏览器打开；电脑请用 Chrome 或 Edge。');
     return;
   }
+  let step = '';                            // 记录走到哪一步，出错时一起显示
   try {
     $('btnConnect').disabled = true;
-    setStatus('选择设备…', 'busy');
+    step = '1/4 选择设备';
+    setStatus(step + '…', 'busy');
     device = await navigator.bluetooth.requestDevice({
-      filters: [{ namePrefix: 'BT_ECB' }, { services: [SERVICE_UUID] }],
+      filters: [{ namePrefix: 'BT_ECB' }],
       optionalServices: [SERVICE_UUID],
     });
     device.addEventListener('gattserverdisconnected', onDisconnected);
-    setStatus('连接 ' + device.name + ' …', 'busy');
+    step = '2/4 连接 ' + device.name;
+    setStatus(step + '…', 'busy');
     const server = await device.gatt.connect();
+    step = '3/4 查找服务 FFF0';
+    setStatus(step + '…', 'busy');
     const service = await server.getPrimaryService(SERVICE_UUID);
+    step = '4/4 查找特征 FFF2';
+    setStatus(step + '…', 'busy');
     writeChar = await service.getCharacteristic(WRITE_CHAR_UUID);
     setStatus('已连接 ' + device.name, 'ok');
     $('btnDisconnect').disabled = false;
   } catch (e) {
     setStatus('未连接');
     $('btnConnect').disabled = false;
-    if (e.name !== 'NotFoundError') showError('连接失败：' + e.message);   // NotFoundError = 用户取消了选择
+    if (e && e.name === 'NotFoundError') return;          // 用户取消了选择
+    // 有的浏览器抛出的不是标准 Error（没有 message），把能拿到的都显示出来
+    const detail = e == null ? String(e)
+                 : [e.name, e.message, e.code].filter(v => v !== undefined && v !== '').join(' / ') || String(e);
+    showError('连接失败（第 ' + step + ' 步）：' + detail);
   }
 }
 
